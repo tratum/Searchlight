@@ -9,7 +9,7 @@ from typing import Optional
 import redis
 import boto3
 import bson
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 from bson import ObjectId
 from docx import Document
 from docx.enum.text import WD_COLOR_INDEX

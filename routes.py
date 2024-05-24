@@ -6,6 +6,7 @@ import urllib.parse
 import uuid
 from io import BytesIO
 from typing import Optional
+import redis
 import boto3
 import bson
 from PyPDF2 import PdfReader
@@ -19,6 +20,7 @@ from fastapi.responses import JSONResponse
 from pymongo import MongoClient
 from models import SearchlightAPIModel
 
+redis_client = redis.Redis(host='localhost', port=6000, db=0)
 router = APIRouter()
 pdf_text_list = []
 config = dotenv_values(".env")
@@ -31,6 +33,10 @@ AWS_ACCESS_KEY = config["AWS_ACCESS_KEY"]
 AWS_SECRET_KEY = config["AWS_SECRET_KEY"]
 BUCKET_NAME = config["BUCKET_NAME"]
 FOLDER_NAME = 'uploads'
+
+def cache_key(keyword: str, pdf_filename: str) -> str:
+    return f"{keyword}:{pdf_filename}"
+
 
 def upload_file_to_s3(file, bucket_name, folder_name, object_key):
     s3_client = boto3.client('s3', aws_access_key_id=AWS_ACCESS_KEY, aws_secret_access_key=AWS_SECRET_KEY)
@@ -110,6 +116,13 @@ async def upload_pdf(
         keyword: str = Form(...),
         pdf: UploadFile = File(...),
 ):
+    key = cache_key(keyword, pdf.filename)
+    cached_response = redis_client.get(key)
+    if cached_response:
+        return JSONResponse(
+            content=cached_response,
+            headers={"Cache-Control": "private, max-age=3600"}
+        )
     uploaded_pdf = pdf.file.read()
     text_in_pdf = pdf_to_text(BytesIO(uploaded_pdf))
     pdf_text_list.extend(text_in_pdf)
@@ -130,4 +143,6 @@ async def upload_pdf(
         "keywordCount": count,
         "docUrl": object_url
     }
-    return JSONResponse(content=api_data)
+
+    redis_client.set(key, api_data, ex=3600)
+    return JSONResponse(content=api_data,headers={"Cache-Control": "private, max-age=3600"})
